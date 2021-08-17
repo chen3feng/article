@@ -7,3 +7,7 @@
 至于笔记，就直接先以 [Issue](https://github.com/chen3feng/article/issues) 的方式来记录了，如果成熟了在考虑整理成文章（也许永远不会）。
 
 有些内容是摘录的网上别人的文章，为了方便阅读以及防止死链而内联复制进来，版权。如果认为侵权请及时反馈。
+
+## 笔记列表
+
+- [工具](https://github.com/chen3feng/article/issues?q=label%3Atype%3Atool)
