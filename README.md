@@ -12,3 +12,4 @@
 
 - [工具](https://github.com/chen3feng/article/issues?q=label%3Atype%3Atool)
 - [文档](https://github.com/chen3feng/article/issues?q=label%3Adocumentation)
+- [系统](https://github.com/chen3feng/article/issues?q=label%3Asystem)
