@@ -4,7 +4,7 @@
 
 文章也可以算作 Blog 吧，纯粹因为懒得自己搭建和维护 Blog，我确实很懒。
 
-至于笔记，就直接先以 [Issue](https://github.com/chen3feng/article/issues) 的方式来记录了，如果成熟了在考虑整理成文章（也许永远不会）。
+至于笔记，就直接先以 [Issue](https://github.com/chen3feng/article/issues) 的方式来记录了，如果成熟了再考虑整理成文章（也许永远不会）。
 
 有些内容是摘录的网上别人的文章，为了方便阅读以及防止死链而内联复制进来，版权。如果认为侵权请及时反馈。
 
