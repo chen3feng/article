@@ -10,8 +10,9 @@
 
 ## 笔记列表
 
+- [系统](https://github.com/chen3feng/article/issues?q=label%3Atype%3Asystem)
 - [工具](https://github.com/chen3feng/article/issues?q=label%3Atype%3Atool)
 - [语言](https://github.com/chen3feng/article/issues?q=label%3Atype%3Alang)
-- [英语](https://github.com/chen3feng/article/issues?q=label%3Atype%3Aenglish)
+- [代码](https://github.com/chen3feng/article/issues?q=label%3Atype%3Acode)
 - [文档](https://github.com/chen3feng/article/issues?q=label%3Adocumentation)
-- [系统](https://github.com/chen3feng/article/issues?q=label%3Atype%3Asystem)
+- [英语](https://github.com/chen3feng/article/issues?q=label%3Atype%3Aenglish)
