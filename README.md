@@ -14,5 +14,6 @@
 - [工具](https://github.com/chen3feng/article/issues?q=label%3Atype%3Atool)
 - [语言](https://github.com/chen3feng/article/issues?q=label%3Atype%3Alang)
 - [代码](https://github.com/chen3feng/article/issues?q=label%3Atype%3Acode)
+- [好库](https://github.com/chen3feng/article/issues?q=label%3Atype%3Alibrary)
 - [文档](https://github.com/chen3feng/article/issues?q=label%3Adocumentation)
 - [英语](https://github.com/chen3feng/article/issues?q=label%3Atype%3Aenglish)
