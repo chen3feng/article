@@ -12,10 +12,10 @@
 
 以下均为标签而非互斥的分类，也就是说一片笔记可能同时带多个标签。
 
-- [系统](https://github.com/chen3feng/article/issues?q=label%3Atype%3Asystem)
-- [工具](https://github.com/chen3feng/article/issues?q=label%3Atype%3Atool)
-- [语言](https://github.com/chen3feng/article/issues?q=label%3Atype%3Alang)
-- [代码](https://github.com/chen3feng/article/issues?q=label%3Atype%3Acode)
-- [好库](https://github.com/chen3feng/article/issues?q=label%3Atype%3Alibrary)
-- [文档](https://github.com/chen3feng/article/issues?q=label%3Adocumentation)
-- [英语](https://github.com/chen3feng/article/issues?q=label%3Atype%3Aenglish)
+- [系统](https://github.com/chen3feng/article/issues?q=label%3Atype%3Asystem)：各种系统的使用技巧
+- [工具](https://github.com/chen3feng/article/issues?q=label%3Atype%3Atool)：各种软件工具
+- [语言](https://github.com/chen3feng/article/issues?q=label%3Atype%3Alang)：各种编程语言
+- [代码](https://github.com/chen3feng/article/issues?q=label%3Atype%3Acode)：收集和远程的一些代码片段（类似gist）
+- [好库](https://github.com/chen3feng/article/issues?q=label%3Atype%3Alibrary)：一些好用的开发库
+- [文档](https://github.com/chen3feng/article/issues?q=label%3Adocumentation)：撰写开发文档的技巧
+- [英语](https://github.com/chen3feng/article/issues?q=label%3Atype%3Aenglish)：英语学习经验和心得
