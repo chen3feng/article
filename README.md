@@ -10,6 +10,8 @@
 
 ## 笔记列表
 
+以下均为标签而非互斥的分类，也就是说一片笔记可能同时带多个标签。
+
 - [系统](https://github.com/chen3feng/article/issues?q=label%3Atype%3Asystem)
 - [工具](https://github.com/chen3feng/article/issues?q=label%3Atype%3Atool)
 - [语言](https://github.com/chen3feng/article/issues?q=label%3Atype%3Alang)
