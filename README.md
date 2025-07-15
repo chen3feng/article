@@ -8,7 +8,7 @@
 
 ## 笔记列表
 
-以下均为标签而非互斥的分类，也就是说一片笔记可能同时带多个标签。
+以下均为标签而非互斥的分类，也就是说一篇笔记可能同时带多个标签。
 
 - [系统](https://github.com/chen3feng/article/discussions?discussions_q=label%3Atype%3Asystem)：各种系统的使用技巧
 - [工具](https://github.com/chen3feng/article/discussions?discussions_q=label%3Atype%3Atool)：各种软件工具
