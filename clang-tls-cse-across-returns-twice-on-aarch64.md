@@ -1,4 +1,4 @@
-# AArch64 上一个 `thread_local` 的诡异 bug：Clang 把 TLS 槽地址 CSE 过了 `returns_twice`
+# Clang 优化能力有多厉害：一个 bug 耗了我两天时间
 
 > 一段 `[[gnu::returns_twice]]` 的标注，三种编译器的反汇编，把一个调了一晚上的 fiber bug
 > 钉死成"这是编译器之间的差异，不是平台之间的差异"。
@@ -6,7 +6,7 @@
 最近在做 [flare][flare] 的 macOS 移植，遇到一个相当顽固的 bug：fiber 的测试在 macOS
 （Apple Silicon）上一跑就 abort，错误信息长这样：
 
-```
+```text
 F fiber_entity.cc:204] Check failed: caller == GetCurrentFiberEntity()
                        SetCurrentFiberEntity did not stick.
 ```
@@ -18,7 +18,8 @@ fiber"。`SetCurrentFiberEntity(caller)` 刚把 `caller` 写进 TLS，下一行�
 
 [flare]: https://github.com/Tencent/flare
 
-调查路径相当曲折——先后试过统一 `[[gnu::returns_twice]]` 声明、`volatile thread_local`、
+调查路径相当曲折——前后断断续续花了两天才定位下来（中间穿插着别的活儿，不然这事不
+至于拖这么久）。先后试过统一 `[[gnu::returns_twice]]` 声明、`volatile thread_local`、
 `asm volatile("" ::: "memory")`——三个看起来都该是"正解"的修复，**没有一个能让 Clang
 让出 `x19`**。最后定位到的结论比"macOS 有 bug"精确得多：**Clang 在 AArch64 上把 TLS 槽
 的地址跨过 `returns_twice` 函数做了 CSE，而 GCC 不会。** Linux 历史上没出问题，是 GCC
@@ -70,7 +71,7 @@ C/C++ 标准里没有任何属性可以表达"这个调用可能让我换一个 
 
 在 macOS Apple Silicon 上，`this_fiber_test` 一跑就 SIGABRT，日志大致长这样：
 
-```
+```text
 F fiber_entity.cc:204] Check failed: caller == GetCurrentFiberEntity()
                        SetCurrentFiberEntity did not stick.
 ```
@@ -199,7 +200,7 @@ FLARE_CHECK_EQ(caller, GetCurrentFiberEntity(), "...");
 任何内存位置可能被改过了，请重新从内存里 load"。但是 `x19` 里**装的不是从内存 load 来
 的值**，而是一个**计算结果**：
 
-```
+```text
 x19 = TPIDR_EL0 + 链接器解析的偏移        ; Linux Clang
 x19 = TLV thunk 的返回值                  ; macOS Apple Clang
 ```
@@ -362,11 +363,11 @@ aarch64-elf-g++ -O2 -S test.cc                              # GCC，ELF TLS
 
 **关键差别一句话**：
 
-| 编译器 | `jump_context` 后干了什么 |
-|---|---|
-| Apple Clang (macOS TLV) | 重用调用前缓存在 `x19` 里的槽地址 ✗ |
-| Clang (Linux ELF-TLS) | 重用调用前缓存在 `x19` 里的槽地址 ✗ |
-| GCC (Linux ELF-TLS) | 重新 `mrs tpidr_el0` + 重算偏移 ✓ |
+| 编译器                    | `jump_context` 后干了什么            |
+| ------------------------- | ------------------------------------ |
+| Apple Clang (macOS TLV)   | 重用调用前缓存在 `x19` 里的槽地址 ✗  |
+| Clang (Linux ELF-TLS)     | 重用调用前缓存在 `x19` 里的槽地址 ✗  |
+| GCC (Linux ELF-TLS)       | 重新 `mrs tpidr_el0` + 重算偏移 ✓    |
 
 GCC 对 `[[gnu::returns_twice]]` 的处理就是更保守一点：跨 call 存活的值不放进 callee-
 saved 寄存器、改放栈上（这样寄存器分配就不能复用了），同时 TLS 寻址重做一遍。Clang
@@ -492,11 +493,11 @@ IR——LLVM bitcode 或 GCC GIMPLE。链接阶段可以**跨 TU 内联**，而�
 
 三种位置 × 是否开 LTO 的安全性：
 
-| 定义位置 | 不开 LTO | 开 LTO / ThinLTO |
-|---|---|---|
-| Header（隐式 `inline`） | ✗ bug | ✗ bug |
-| `.cc` 文件（跨 TU） | ✓ 安全 | **✗ bug 回来** |
-| `[[gnu::noinline]]`（无论位置） | ✓ 安全 | ✓ 安全 |
+| 定义位置                        | 不开 LTO | 开 LTO / ThinLTO |
+| ------------------------------- | -------- | ---------------- |
+| Header（隐式 `inline`）         | ✗ bug    | ✗ bug            |
+| `.cc` 文件（跨 TU）             | ✓ 安全   | **✗ bug 回来**   |
+| `[[gnu::noinline]]`（无论位置） | ✓ 安全   | ✓ 安全           |
 
 如果想再加一层保险，还有 `[[gnu::noipa]]`（"no interprocedural analysis"，连过程间分
 析都不许做）——比 `noinline` 更强。flare 这个场景实际上单 `noinline` 已经够稳：我们
