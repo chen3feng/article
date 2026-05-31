@@ -1,7 +1,7 @@
 # Clang 优化能力有多厉害：一个 bug 耗了我两天时间
 
-> 一段 `[[gnu::returns_twice]]` 的标注，三种编译器的反汇编，把一个调了一晚上的 fiber bug
-> 钉死成"这是编译器之间的差异，不是平台之间的差异"。
+> 一段 `[[gnu::returns_twice]]` 的标注，三种编译器的反汇编，把一个断断续续调了两天的
+> fiber bug 钉死成"这是编译器之间的差异，不是平台之间的差异"。
 
 最近在做 [flare][flare] 的 macOS 移植，遇到一个相当顽固的 bug：fiber 的测试在 macOS
 （Apple Silicon）上一跑就 abort，错误信息长这样：
