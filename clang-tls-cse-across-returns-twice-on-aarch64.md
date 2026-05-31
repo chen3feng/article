@@ -540,7 +540,57 @@ IR——LLVM bitcode 或 GCC GIMPLE。链接阶段可以**跨 TU 内联**，而�
 
 ---
 
-## 十三、收获
+## 十三、其他人撞过吗？—— 解决完后好奇搜了一下
+
+事情解决完，出于好奇搜了一圈，结果发现这其实是 LLVM 圈子里早就知道的一类 bug——只
+不过被讨论的载体大多是 **C++20 原生 coroutine**，不是 fiber。换个语境，bug 形状一模
+一样。
+
+- [llvm/llvm-project#57260](https://github.com/llvm/llvm-project/issues/57260)
+  *"coroutine optimizer too aggressive for thread local variables"*——`-O2` 下
+  `thread_local` 被错误地认为跨 `co_await` 不变；
+- [llvm/llvm-project#63022](https://github.com/llvm/llvm-project/issues/63022)
+  标题直接是 *"Compiler incorrectly caches thread_local **address** across
+  suspend-points"*——和本文 §六"x19 里缓存的是地址"那一刀几乎一字不差；
+- LLVM discourse 上 ChuanqiXu 主导的
+  [Address thread identification problems with coroutine](https://discourse.llvm.org/t/address-thread-identification-problems-with-coroutine/62015)
+  这个讨论串，给出的根因和本文 §九 总结的一致：
+
+  > "the introduction of coroutine break the assumption that a function is only
+  > possible to be run in one thread. LLVM's IR representation treats TLS
+  > addresses as constants, automatically sinking address computations below
+  > their syntactic location."
+
+LLVM 给 C++20 协程的修法很硬核：CoroEarly pass 在每个 suspend point 插一个
+`llvm.coro.may_change()` intrinsic，告诉中间的优化 pass "这里 TLS 可能变了，别 sink"，
+CoroCleanup 再清掉。但这一整套设施只对 **frontend 显式生成的 coroutine IR** 起作用。
+**`jump_context` 在 LLVM 眼里只是一个普通的 `returns_twice` 外部函数调用，根本接不上
+这套机制。** 我们这种 fiber 实现只能靠 `noinline` 自卫。
+
+横看其它工具链/生态对同一个问题的态度：
+
+| 触发载体                            | 业内的处理方式                                                |
+| ----------------------------------- | ------------------------------------------------------------- |
+| C++20 native coroutine              | LLVM 加 `llvm.coro.may_change()` intrinsic ✓                  |
+| Boost.Context 风格的 fiber          | 文档直接写 "must not reference thread-local storage"          |
+| MSVC + Win32 fiber                  | 编译器开关 `/GT`（fiber-safe TLS）                            |
+| GCC fiber（含 flare 在 Linux 历史） | GCC 凑巧对 `returns_twice` 保守，意外免疫                     |
+| **Clang + 非协程的 fiber**          | **目前没系统级修复——`noinline` 自卫**                        |
+
+[Boost.Context 文档](https://www.boost.org/doc/libs/1_54_0/libs/context/doc/html/context/context.html)
+里那条 "must not reference thread-local storage" 写法很 Boost ——把坑作为使用限制告
+诉用户，让用户自己绕。flare 因为业务里到处都依赖 `thread_local current_fiber`、根本
+绕不开这个限制，所以才需要 `noinline` 这条工程性防线。MSVC 因为历史上 Win32 Fiber
+API 太流行，反而早就有 `/GT` 这个专门的编译器选项来处理同一个问题；而 Clang 这边，
+非协程的 fiber 用户一直在等一个对应物。
+
+最有意思的发现是：**这个 bug 不是冷门坑，而是个相当结构性的 "thread-affine 假设碰上
+跨线程恢复" 的问题；只是 fiber 在工业 C++ 圈里相对小众，所以一直没攒到优先级让 LLVM
+给出系统级修复。** 我们俩天的时间，换来的是把这个事实在自己代码里说清楚。
+
+---
+
+## 十四、收获
 
 整理一下这次踩坑的几个教训：
 
