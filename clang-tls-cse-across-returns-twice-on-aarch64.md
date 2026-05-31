@@ -18,15 +18,16 @@ fiber"。`SetCurrentFiberEntity(caller)` 刚把 `caller` 写进 TLS，下一行�
 
 [flare]: https://github.com/Tencent/flare
 
-调查路径走得相当曲折——`[[gnu::returns_twice]]`、`volatile`、甚至怀疑过 Apple Clang 的
-TLV 实现——每一个看起来"正解"的修复都没成功。最后真正定位下来，是一个比"macOS 有 bug"
-精确得多的结论：**Clang 在 AArch64 上把 TLS 槽的地址跨过 `returns_twice` 函数做了 CSE，
-而 GCC 不会。** Linux 历史上没出问题，是 GCC 在救我们，不是 Linux 本身比 macOS 安全。
+调查路径相当曲折——先后试过统一 `[[gnu::returns_twice]]` 声明、`volatile thread_local`、
+`asm volatile("" ::: "memory")`——三个看起来都该是"正解"的修复，**没有一个能让 Clang
+让出 `x19`**。最后定位到的结论比"macOS 有 bug"精确得多：**Clang 在 AArch64 上把 TLS 槽
+的地址跨过 `returns_twice` 函数做了 CSE，而 GCC 不会。** Linux 历史上没出问题，是 GCC
+在救我们，不是 Linux 本身比 macOS 安全。
 
 这篇笔记把这个 bug 的来龙去脉记一下，包括三条没走通的弯路、关键的反汇编对比、以及"为什么
-`returns_twice` 和 `volatile` 都不管用"的精确分析。三种编译器的反汇编对比放在
-[gist](https://gist.github.com/chen3feng/b99e550dc8a9452fbe9b8e88866cbc6e) 里，本文里只
-摘要。
+`returns_twice`、`volatile`、`asm("" ::: "memory")` 都不管用"的精确分析。三种编译器的
+反汇编完整版放在 [gist](https://gist.github.com/chen3feng/b99e550dc8a9452fbe9b8e88866cbc6e)
+里，本文里只摘要。
 
 ---
 
@@ -154,7 +155,75 @@ load/store**，但如果编译器缓存的是"TLS 槽的地址"，那 volatile �
 
 ---
 
-## 五、根本原因：把反汇编打出来看
+## 五、第三次猜想：编译器内存屏障 `asm volatile("" ::: "memory")` 行不行？
+
+`volatile thread_local` 不行，那退一步：在 `jump_context` 之后加一个**编译器级别的内存
+屏障**——告诉编译器"屏障之后，内存里任何字节都可能被改过了，所有缓存都得作废"——这
+个总该够了吧？
+
+```cpp
+jump_context(&caller->state_save_area, state_save_area, this);
+asm volatile("" ::: "memory");   // ←── 候选 fix
+SetCurrentFiberEntity(caller);
+FLARE_CHECK_EQ(caller, GetCurrentFiberEntity(), "...");
+```
+
+把最小复现里加上同样的 barrier，重新跑反汇编：
+
+```asm
+; Apple Clang，macOS arm64，加了 asm volatile("" ::: "memory") 之后
+    mov  x19, x0                  ; 槽地址依然缓存到 x19
+    ldr  x20, [x0]
+    bl   _jump_context
+    ; InlineAsm Start              ; ←── memory barrier 在这（空指令）
+    ; InlineAsm End
+①   str  x20, [x19]               ; ←── 关键：barrier 之后还是用缓存的 x19！
+    ret
+```
+
+```asm
+; Clang，aarch64-linux-gnu，同样
+    add  x19, x8, :tprel_lo12_nc:current_fiber   ; 槽地址缓存到 x19
+    ldr  x20, [x19]
+    bl   jump_context
+    //APP                                         ; ←── memory barrier
+    //NO_APP
+①   str  x20, [x19]                              ; ←── 关键：barrier 之后还是用缓存的 x19
+    ret
+```
+
+**Clang 完全无视了 barrier**。barrier 前后 `x19` 没有任何变化，地址依然在用同一个寄存器
+里的旧值。
+
+为什么？`asm volatile("" ::: "memory")` 的语义只覆盖**内存内容**——它说的是"屏障之后
+任何内存位置可能被改过了，请重新从内存里 load"。但是 `x19` 里**装的不是从内存 load 来
+的值**，而是一个**计算结果**：
+
+```
+x19 = TPIDR_EL0 + 链接器解析的偏移        ; Linux Clang
+x19 = TLV thunk 的返回值                  ; macOS Apple Clang
+```
+
+从编译器看，`x19` 是个"系统寄存器 + 常量"派生出来的纯计算，**不是内存 load**。"memory"
+clobber 没有任何理由让它失效——和 `volatile` 失败的根因**完全一样**，都是因为这两个
+机制覆盖的是"值"，覆盖不到"地址"。
+
+要让 inline asm 真的解决这个问题，得显式 clobber 槽地址所在的那个寄存器：
+
+```cpp
+asm volatile("" ::: "memory", "x19");   // 不可移植，而且基于猜寄存器分配
+```
+
+但这就开始猜寄存器分配了——AArch64 今天放 x19，明天的编译器版本或者别的 ABI 上可能放
+x20、x21、x28；x86_64 又是另一套。要做对得把所有 GP 寄存器都列出来 clobber，相当于自
+己手写一个伪 setjmp 返回——这正是 GCC 内部对 `returns_twice` 已经在做的事，自己再写
+一遍又笨又脆。
+
+第三次猜想也错。这时候终于必须把反汇编拿出来看了。
+
+---
+
+## 六、根本原因：把反汇编打出来看
 
 诊断到这一步，靠脑补已经不够了。把对象文件 `objdump` 出来对比，立刻一目了然。
 
@@ -209,7 +278,7 @@ ABI 规定调用方不能假设外部函数的返回值在两次调用之间相�
 
 ---
 
-## 六、横向对比：写个最小例子，跑三种编译器
+## 七、横向对比：写个最小例子，跑三种编译器
 
 但是疑问还在：为什么 Linux 同样的代码、`noinline` 据说之前根本没有，怎么就没出过事？
 
@@ -312,7 +381,7 @@ saved 寄存器、改放栈上（这样寄存器分配就不能复用了），�
 
 ---
 
-## 七、为什么 `returns_twice` 没救我们？
+## 八、为什么 `returns_twice` 没救我们？
 
 `returns_twice` 的语义是从 `setjmp`/`longjmp` 来的：
 
@@ -333,25 +402,33 @@ GCC 给了我们更宽松的"假设最坏情况"的对待，但这只是 GCC 实
 
 ---
 
-## 八、为什么 `volatile` 也不管用？
+## 九、为什么 `volatile` 和 memory barrier 都不管用？
 
-`volatile` 强制对**变量本身的访问**逐次发生——load/store 不能被合并、不能被消除。但对
-"thread_local 变量"来说，访问分两步：
+第三、四节里那两次失败，根因是**完全一样**的。访问一个 `thread_local` 变量在编译器眼
+里分成两步：
 
-1. **解析槽地址**（在 macOS 上是 `blr x8` 调 TLV thunk；在 Linux 上是 `mrs TPIDR_EL0`
-   + 链接器偏移）。
+1. **解析槽地址**（macOS 上是 `blr x8` 调 TLV thunk；Linux 上是 `mrs TPIDR_EL0` +
+   链接器偏移）。
 2. **读/写槽**（普通的 `ldr`/`str`）。
 
-`volatile` 只覆盖了第 2 步——逼着你 load 而不能优化掉。但第 1 步——槽地址的解析——
-不在 `volatile` 的语义里。所以 Apple Clang 把第 1 步的结果缓存在 `x19`，第 2 步乖乖
-每次重新 `ldr`/`str`——结果你逐次 load 的还是同一个**陈旧的**地址。
+`volatile thread_local` 只覆盖了第 2 步——逼着每次 `ldr`/`str` 都老实发出来，不能被
+优化掉。但第 1 步——槽地址的解析——不在 `volatile` 的语义里，所以 Apple Clang 把第
+1 步的结果缓存在 `x19`、第 2 步每次乖乖重读，结果一直 load 的还是同一个**陈旧**地
+址。
 
-`volatile` 没说"thread 可能变了"。`returns_twice` 也没说。两个属性的语义都没有覆盖这
-个 case，所以两个都不管用。
+`asm volatile("" ::: "memory")` 同理：它只说"内存里的内容可能被改了"，所以编译器会把
+变量本身的最新值重新 load 一遍——但 `x19` 装的是个"系统寄存器 + 常量"算出来的地
+址，不是从内存 load 的值。"memory" clobber 没有任何理由让一个不依赖内存的寄存器内容
+失效。
+
+一句话总结这一组失败：
+
+> `volatile`、`asm("" ::: "memory")`、`returns_twice` ——**这三个机制覆盖的都是
+> "值"，覆盖不到"地址"**。而我们要防的偏偏是"槽地址被跨 call 缓存"。
 
 ---
 
-## 九、为什么 x86_64 完全没出过这个 bug？
+## 十、为什么 x86_64 完全没出过这个 bug？
 
 x86_64 的 TLS 访问长这样：
 
@@ -371,7 +448,7 @@ CSE。
 
 ---
 
-## 十、修复：`noinline`，以及为什么是它
+## 十一、修复：`noinline`，以及为什么是它
 
 回到 flare 的代码：
 
@@ -393,26 +470,33 @@ CSE。
 
 ---
 
-## 十一、收获
+## 十二、收获
 
 整理一下这次踩坑的几个教训：
 
 1. **编译器属性按 spec 解读，不按"我以为它的意思"解读。** `returns_twice` 看着像万金
    油，实际上它的语义只覆盖 `setjmp` 那一类同线程的"第二次返回"，根本没有覆盖"线程
-   可能换了"这件事。`volatile` 同理——它说的是"重新 load/store"，不是"重新解析
-   thread-local 寻址"。
+   可能换了"这件事。`volatile`、`asm("" ::: "memory")` 同理——它们说的是"重新 load
+   /store 这个值"，不是"重新解析 thread-local 的寻址"。
 
-2. **"在 X 上跑得好"经常其实是"X 平台默认的编译器跑得好"。** Linux + GCC 工作，不代
+2. **"覆盖值"和"覆盖地址"是两件事。** 我们这次试过的所有"软"机制（`returns_twice`、
+   `volatile`、memory barrier）保证的都是"调用前后值可能不同"，而 fiber 真正要防的是
+   "调用前后地址可能不同"——后者目前没有任何标准 C/C++ 机制能直接表达。
+
+3. **"在 X 上跑得好"经常其实是"X 平台默认的编译器跑得好"。** Linux + GCC 工作，不代
    表 Linux 安全；Linux + Clang 会重现 macOS 上的 bug。把"Linux"和"GCC"分开看，结论
    会立刻清楚。
 
-3. **猜不动的时候，反汇编是终极裁判。** 写一段最小复现，跑三个编译器，把 `_Z4Testv:`
-   到 `ret` 之间那 20 行汇编贴出来——比看一千行优化器源码都直接。
+4. **猜不动的时候，反汇编是终极裁判。** 写一段最小复现，跑三个编译器，把 `_Z4Testv:`
+   到 `ret` 之间那 20 行汇编贴出来——比看一千行优化器源码都直接。这次三个失败的猜想
+   全是被反汇编一锤定音的。
 
-4. **ABI 边界天然抗 CSE。** 当你想阻止某种"跨某次调用的优化"但又找不到合适的编译器
+5. **ABI 边界天然抗 CSE。** 当你想阻止某种"跨某次调用的优化"但又找不到合适的编译器
    属性时，把那个访问藏到一个 `noinline` 的小函数后面，是个非常便宜、非常通用的招。
+   inline asm clobber 可以模拟这件事，但需要列出所有 GP 寄存器才完整——还不如直接借
+   ABI。
 
-5. **任何"调用之后可能换 OS 线程"的原语都有这个隐患。** 用户态线程库
+6. **任何"调用之后可能换 OS 线程"的原语都有这个隐患。** 用户态线程库
    （fiber、user-mode 协程）、`ucontext` 上面的封装、跨线程 work-stealing 调度的入口
    函数等等。C/C++ 没有标准属性能告诉编译器这件事，所以底层切换原语两侧的 thread_local
    访问都得防一手。
